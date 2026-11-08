@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimizador de cortes</title>
+<meta name="description" content="Optimiza el corte de piezas de mobiliario en tableros de 2,44 x 1,22 m y dibuja el plano de corte.">
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --texto: #1f2328;
+    --suave: #667085;
+    --borde: #d9d5cb;
+    --acento: #1c4587;
+    --acento-txt: #ffffff;
+    --tablero: #f2ead8;
+    --ok: #2e7d32;
+    --medio: #b26a00;
+    --bajo: #b42318;
+    --aviso-bg: #fff4e5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a;
+      --panel: #1e2125;
+      --texto: #e8eaed;
+      --suave: #9aa3ad;
+      --borde: #343a40;
+      --acento: #6f9be0;
+      --acento-txt: #0d1b33;
+      --tablero: #3a3428;
+      --ok: #6fcf75;
+      --medio: #f0b24a;
+      --bajo: #ff8a80;
+      --aviso-bg: #3a2f1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--texto);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header, main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+  header { padding-top: 24px; padding-bottom: 4px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .sub { color: var(--suave); margin: 0; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--borde);
+    border-radius: 10px;
+    padding: 16px;
+    margin: 16px 0;
+  }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  label { display: block; font-size: 0.85rem; color: var(--suave); margin-bottom: 4px; }
+  input[type=text], input[type=number] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--texto);
+    font: inherit;
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+  .check { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--texto); font-size: 0.95rem; }
+  .check input { width: 18px; height: 18px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 0.8rem; color: var(--suave); font-weight: 600; padding: 4px 6px; }
+  td { padding: 4px 6px; }
+  td input { min-width: 70px; }
+  .botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button {
+    font: inherit;
+    padding: 9px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--borde);
+    background: var(--panel);
+    color: var(--texto);
+    cursor: pointer;
+  }
+  button.primario { background: var(--acento); color: var(--acento-txt); border-color: var(--acento); font-weight: 600; }
+  button.quitar { padding: 6px 10px; color: var(--bajo); }
+  button:hover { filter: brightness(0.95); }
+  .aviso {
+    background: var(--aviso-bg);
+    border: 1px solid var(--medio);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 12px;
+    display: none;
+  }
+  .aviso.visible { display: block; }
+  .kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 8px; }
+  .kpi { border: 1px solid var(--borde); border-radius: 8px; padding: 12px; }
+  .kpi b { display: block; font-size: 1.6rem; line-height: 1.2; }
+  .kpi span { color: var(--suave); font-size: 0.85rem; }
+  .tablero { margin-top: 20px; }
+  .tablero-cab { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .nivel-excelente, .nivel-bueno { color: var(--ok); font-weight: 600; }
+  .nivel-regular { color: var(--medio); font-weight: 600; }
+  .nivel-bajo { color: var(--bajo); font-weight: 600; }
+  svg.plano { width: 100%; height: auto; border: 1px solid var(--borde); border-radius: 6px; background: var(--panel); }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--acento); }
+  .detalle td, .detalle th { border-bottom: 1px solid var(--borde); font-size: 0.85rem; }
+  .vacio { color: var(--suave); }
+  footer { max-width: 1100px; margin: 0 auto; padding: 8px 16px 32px; color: var(--suave); font-size: 0.85rem; }
+  @media (max-width: 600px) {
+    td input { min-width: 56px; padding: 6px; }
+    h1 { font-size: 1.35rem; }
+  }
+  @media print {
+    .controles, .botones, button, footer { display: none !important; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Optimizador de cortes</h1>
+  <p class="sub">Acomoda piezas de mobiliario en tableros estándar, calcula el aprovechamiento y dibuja el plano de corte.</p>
+</header>
+
+<main>
+  <section class="panel controles" aria-labelledby="t-tablero">
+    <h2 id="t-tablero">1. Tablero y condiciones de corte (cm)</h2>
+    <div class="grid">
+      <div><label for="ancho">Ancho del tablero</label><input type="number" id="ancho" value="244" min="10" step="0.1"></div>
+      <div><label for="alto">Alto del tablero</label><input type="number" id="alto" value="122" min="10" step="0.1"></div>
+      <div><label for="sierra">Desgaste de sierra por corte</label><input type="number" id="sierra" value="0.5" min="0" step="0.1"></div>
+      <div><label for="refilado">Refilado por borde</label><input type="number" id="refilado" value="0.5" min="0" step="0.1"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="rotar" checked> Permitir girar las piezas 90° (desmarcar si la veta debe respetarse)</label>
+    <p class="sub" id="zona-util" style="margin-top:8px"></p>
+  </section>
+
+  <section class="panel controles" aria-labelledby="t-piezas">
+    <h2 id="t-piezas">2. Piezas a cortar (cm)</h2>
+    <table>
+      <thead><tr><th>Nombre</th><th>Ancho</th><th>Alto</th><th>Cantidad</th><th></th></tr></thead>
+      <tbody id="filas"></tbody>
+    </table>
+    <div class="botones">
+      <button type="button" id="agregar">+ Agregar pieza</button>
+      <button type="button" id="ejemplo">Cargar ejemplo de cocina</button>
+      <button type="button" id="limpiar">Vaciar lista</button>
+      <button type="button" class="primario" id="optimizar">Optimizar cortes</button>
+    </div>
+    <div class="aviso" id="aviso" role="alert"></div>
+  </section>
+
+  <section class="panel" id="resultado" aria-live="polite" hidden>
+    <h2>3. Resultado</h2>
+    <div class="kpis" id="kpis"></div>
+    <div class="botones">
+      <button type="button" id="imprimir">Imprimir / guardar PDF</button>
+    </div>
+    <div id="tableros"></div>
+  </section>
+</main>
+
+<footer>
+  Método de franjas (shelf packing): ordena las piezas de mayor a menor alto y las coloca en la primera franja donde caben.
+  No garantiza la solución óptima.
+</footer>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------
+   Optimizador de cortes (nesting por estantes)
+   Mismo algoritmo del taller en Python, portado a JavaScript:
+   1. Ordenar piezas de mayor a menor alto.
+   2. Cada tablero se divide en franjas horizontales (estantes).
+   3. Cada pieza va al primer estante donde quepa; si no cabe en ninguno
+      se abre un estante nuevo; si el tablero está lleno, un tablero nuevo.
+   ------------------------------------------------------------------ */
+
+const EJEMPLO = [
+  { nombre: "Lateral",      w: 60,  h: 100, cant: 4 },
+  { nombre: "Puerta",       w: 45,  h: 70,  cant: 4 },
+  { nombre: "Repisa",       w: 80,  h: 35,  cant: 6 },
+  { nombre: "Fondo",        w: 120, h: 60,  cant: 2 },
+  { nombre: "Frente cajon", w: 80,  h: 20,  cant: 3 }
+];
+
+const COLORES = ["#9fc5e8", "#b6d7a8", "#ffd966", "#f4b183", "#d5a6bd", "#a2c4c9", "#c9b6e4", "#e6b8af"];
+const $ = (id) => document.getElementById(id);
+
+/* ------------------------------ configuración ------------------------------ */
+function leerConfig() {
+  const num = (id) => parseFloat(String($(id).value).replace(",", "."));
+  const cfg = {
+    ancho: num("ancho"), alto: num("alto"),
+    sierra: num("sierra"), refilado: num("refilado"),
+    rotar: $("rotar").checked
+  };
+  cfg.anchoUtil = cfg.ancho - 2 * cfg.refilado;
+  cfg.altoUtil = cfg.alto - 2 * cfg.refilado;
+  return cfg;
+}
+
+function configValida(cfg) {
+  const campos = [cfg.ancho, cfg.alto, cfg.sierra, cfg.refilado];
+  if (campos.some((v) => Number.isNaN(v) || v < 0)) return "Revise las medidas del tablero y de corte: deben ser números positivos.";
+  if (cfg.anchoUtil <= 0 || cfg.altoUtil <= 0) return "El refilado es demasiado grande para el tamaño del tablero.";
+  return "";
+}
+
+function mostrarZonaUtil() {
+  const cfg = leerConfig();
+  const err = configValida(cfg);
+  $("zona-util").textContent = err ||
+    "Zona útil después del refilado: " + fmt(cfg.anchoUtil) + " x " + fmt(cfg.altoUtil) + " cm.";
+}
+
+/* ----------------------------- lista de piezas ----------------------------- */
+function crearFila(p) {
+  const tr = document.createElement("tr");
+  const celda = (html) => { const td = document.createElement("td"); td.innerHTML = html; return td; };
+  tr.appendChild(celda('<input type="text" class="f-nombre" aria-label="Nombre" placeholder="Ej: Puerta">'));
+  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-w" aria-label="Ancho">'));
+  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-h" aria-label="Alto">'));
+  tr.appendChild(celda('<input type="number" class="f-cant" aria-label="Cantidad" min="1" step="1">'));
+  tr.appendChild(celda('<button type="button" class="quitar" aria-label="Quitar pieza">✕</button>'));
+  tr.querySelector(".f-nombre").value = p.nombre;
+  tr.querySelector(".f-w").value = p.w;
+  tr.querySelector(".f-h").value = p.h;
+  tr.querySelector(".f-cant").value = p.cant;
+  tr.querySelector(".quitar").addEventListener("click", () => { tr.remove(); guardar(); });
+  tr.addEventListener("input", guardar);
+  tr.addEventListener("keydown", (e) => { if (e.key === "Enter") { agregarFila(); } });
+  return tr;
+}
+
+function agregarFila(p) {
+  const tr = crearFila(p || { nombre: "", w: "", h: "", cant: 1 });
+  $("filas").appendChild(tr);
+  if (!p) tr.querySelector(".f-nombre").focus();
+}
+
+function cargarLista(lista) {
+  $("filas").innerHTML = "";
+  lista.forEach((p) => $("filas").appendChild(crearFila(p)));
+  guardar();
+}
+
+function leerPiezas(cfg) {
+  const piezas = [];
+  const errores = [];
+  const maxLado = Math.max(cfg.anchoUtil, cfg.altoUtil);
+  const filas = $("filas").querySelectorAll("tr");
+  filas.forEach((tr, i) => {
+    const nombre = tr.querySelector(".f-nombre").value.trim();
+    const w = parseFloat(tr.querySelector(".f-w").value.replace(",", "."));
+    const h = parseFloat(tr.querySelector(".f-h").value.replace(",", "."));
+    const cant = parseInt(tr.querySelector(".f-cant").value, 10);
+    const etiqueta = "Fila " + (i + 1) + (nombre ? " (" + nombre + ")" : "");
+    if (nombre === "") { errores.push(etiqueta + ": falta el nombre."); }
+    else if (Number.isNaN(w) || Number.isNaN(h) || w <= 0 || h <= 0) { errores.push(etiqueta + ": el ancho y el alto deben ser números mayores que 0."); }
+    else if (w > maxLado || h > maxLado) { errores.push(etiqueta + ": supera la zona útil del tablero (" + fmt(maxLado) + " cm)."); }
+    else if (Number.isNaN(cant) || cant < 1 || cant > 200) { errores.push(etiqueta + ": la cantidad debe estar entre 1 y 200."); }
+    else { piezas.push({ nombre, w, h, cant }); }
+  });
+  return { piezas, errores };
+}
+
+/* ------------------------------ persistencia ------------------------------- */
+function guardar() {
+  try {
+    const datos = [];
+    $("filas").querySelectorAll("tr").forEach((tr) => datos.push({
+      nombre: tr.querySelector(".f-nombre").value,
+      w: tr.querySelector(".f-w").value,
+      h: tr.querySelector(".f-h").value,
+      cant: tr.querySelector(".f-cant").value
+    }));
+    localStorage.setItem("optimizador-piezas", JSON.stringify(datos));
+  } catch (e) { /* sin almacenamiento: la app funciona igual */ }
+}
+
+function restaurar() {
+  try {
+    const crudo = localStorage.getItem("optimizador-piezas");
+    if (crudo) {
+      const datos = JSON.parse(crudo);
+      if (Array.isArray(datos) && datos.length > 0) { cargarLista(datos); return; }
+    }
+  } catch (e) { /* ignorar */ }
+  cargarLista(EJEMPLO);
+}
+
+/* ------------------------------- algoritmo -------------------------------- */
+function expandirPiezas(lista) {
+  const unidades = [];
+  for (const p of lista) {
+    for (let n = 1; n <= p.cant; n++) {           // ciclo for por cantidad
+      unidades.push({ nombre: p.nombre + " " + n, base: p.nombre, w: p.w, h: p.h });
+    }
+  }
+  return unidades;
+}
+
+function orientar(pieza) {
+  // Deja la pieza acostada (ancho >= alto) para formar filas largas.
+  if (pieza.w < pieza.h) { const t = pieza.w; pieza.w = pieza.h; pieza.h = t; }
+}
+
+function nuevoTablero() {
+  return { estantes: [], yUsado: 0, piezas: [] };
+}
+
+function intentarColocar(tablero, pieza, cfg) {
+  // Prueba la orientación actual y, si se permite, la pieza girada 90°.
+  const giros = cfg.rotar ? [false, true] : [false];
+  for (const girada of giros) {
+    const w = girada ? pieza.h : pieza.w;
+    const h = girada ? pieza.w : pieza.h;
+
+    // 1) ¿cabe en algún estante existente?
+    for (const est of tablero.estantes) {
+      const hayAncho = est.xUsado + w <= cfg.anchoUtil + 1e-9;
+      const cabeAlto = h <= est.alto + 1e-9;
+      if (hayAncho && cabeAlto) {
+        tablero.piezas.push({ nombre: pieza.nombre, base: pieza.base,
+          x: cfg.refilado + est.xUsado, y: cfg.refilado + est.y, w, h });
+        est.xUsado += w + cfg.sierra;
+        return true;
+      }
+    }
+
+    // 2) ¿se puede abrir un estante nuevo?
+    if (tablero.yUsado + h <= cfg.altoUtil + 1e-9 && w <= cfg.anchoUtil + 1e-9) {
+      const y = tablero.yUsado;
+      tablero.estantes.push({ y, alto: h, xUsado: w + cfg.sierra });
+      tablero.yUsado += h + cfg.sierra;
+      tablero.piezas.push({ nombre: pieza.nombre, base: pieza.base,
+        x: cfg.refilado, y: cfg.refilado + y, w, h });
+      return true;
+    }
+  }
+  return false;       // no cupo: hay que usar otro tablero
+}
+
+function optimizar(lista, cfg) {
+  const unidades = expandirPiezas(lista);
+  if (cfg.rotar) unidades.forEach(orientar);
+  unidades.sort((a, b) => b.h - a.h);
+
+  const tableros = [nuevoTablero()];
+  const sinLugar = [];
+  for (const pieza of unidades) {
+    let colocada = false;
+    for (const t of tableros) {                    // probar tableros abiertos
+      if (intentarColocar(t, pieza, cfg)) { colocada = true; break; }
+    }
+    if (!colocada) {                               // abrir un tablero nuevo
+      const t = nuevoTablero();
+      if (intentarColocar(t, pieza, cfg)) tableros.push(t);
+      else sinLugar.push(pieza.nombre);
+    }
+  }
+  if (tableros[tableros.length - 1].piezas.length === 0) tableros.pop();
+  return { tableros, sinLugar };
+}
+
+function clasificar(aprov) {
+  if (aprov >= 85) return ["excelente", "nivel-excelente"];
+  else if (aprov >= 70) return ["bueno", "nivel-bueno"];
+  else if (aprov >= 50) return ["regular", "nivel-regular"];
+  else return ["bajo (conviene usar un retazo)", "nivel-bajo"];
+}
+
+/* -------------------------------- resultados -------------------------------- */
+function fmt(n) {
+  return (Math.round(n * 100) / 100).toString().replace(".", ",");
+}
+
+function esc(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function crearSVG(tablero, idx, cfg, colorDe) {
+  const W = cfg.ancho, H = cfg.alto;
+  const margen = 6;
+  let s = '<svg class="plano" id="svg-' + idx + '" xmlns="http://www.w3.org/2000/svg" viewBox="' +
+    (-margen) + " " + (-margen) + " " + (W + 2 * margen) + " " + (H + 2 * margen) +
+    '" role="img" aria-label="Plano de corte del tablero ' + (idx + 1) + '" font-family="sans-serif">';
+  s += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#f2ead8" stroke="#222" stroke-width="0.8"/>';
+  s += '<rect x="' + cfg.refilado + '" y="' + cfg.refilado + '" width="' + cfg.anchoUtil + '" height="' + cfg.altoUtil +
+       '" fill="none" stroke="#c0392b" stroke-width="0.4" stroke-dasharray="2 1.5"/>';
+  for (const p of tablero.piezas) {
+    s += '<rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" fill="' + colorDe(p.base) +
+         '" stroke="#1c4587" stroke-width="0.4"/>';
+    if (p.w >= 18 && p.h >= 10) {
+      const t = Math.min(4.2, p.w / 9, p.h / 3.2);
+      s += '<text x="' + (p.x + p.w / 2) + '" y="' + (p.y + p.h / 2 - t * 0.15) + '" font-size="' + t.toFixed(2) +
+           '" text-anchor="middle" fill="#1b1b1b">' + esc(p.nombre) + '</text>';
+      s += '<text x="' + (p.x + p.w / 2) + '" y="' + (p.y + p.h / 2 + t * 1.05) + '" font-size="' + (t * 0.85).toFixed(2) +
+           '" text-anchor="middle" fill="#333">' + fmt(p.w) + " x " + fmt(p.h) + '</text>';
+    }
+  }
+  return s + "</svg>";
+}
+
+function mostrarResultado(res, cfg) {
+  const areaTablero = cfg.ancho * cfg.alto;
+  const tableros = res.tableros;
+  const colores = {};
+  let ci = 0;
+  const colorDe = (base) => {
+    if (!(base in colores)) { colores[base] = COLORES[ci % COLORES.length]; ci++; }
+    return colores[base];
+  };
+
+  let areaUtilTotal = 0;
+  let html = "";
+  tableros.forEach((t, i) => {
+    const areaPiezas = t.piezas.reduce((a, p) => a + p.w * p.h, 0);
+    areaUtilTotal += areaPiezas;
+    const aprov = areaPiezas / areaTablero * 100;
+    const [nivel, clase] = clasificar(aprov);
+    html += '<div class="tablero"><div class="tablero-cab"><strong>Tablero ' + (i + 1) + "</strong>" +
+      '<span>' + t.piezas.length + " piezas · aprovechamiento " + fmt(aprov) + '% · <span class="' + clase + '">' + nivel + "</span></span></div>";
+    html += crearSVG(t, i, cfg, colorDe);
+    html += '<div class="botones"><button type="button" data-png="' + i + '">Descargar plano (PNG)</button></div>';
+    html += '<details><summary>Ver lista de cortes</summary><table class="detalle"><thead><tr><th>Pieza</th><th>Medida (cm)</th><th>Posición x, y (cm)</th></tr></thead><tbody>';
+    for (const p of t.piezas) {
+      html += "<tr><td>" + esc(p.nombre) + "</td><td>" + fmt(p.w) + " x " + fmt(p.h) + "</td><td>" + fmt(p.x) + ", " + fmt(p.y) + "</td></tr>";
+    }
+    html += "</tbody></table></details></div>";
+  });
+
+  const total = areaTablero * tableros.length;
+  const aprovGlobal = total > 0 ? areaUtilTotal / total * 100 : 0;
+  const desperdicio = (total - areaUtilTotal) / 10000;
+  $("kpis").innerHTML =
+    '<div class="kpi"><b>' + tableros.length + '</b><span>Tableros necesarios</span></div>' +
+    '<div class="kpi"><b>' + fmt(aprovGlobal) + '%</b><span>Aprovechamiento total</span></div>' +
+    '<div class="kpi"><b>' + fmt(desperdicio) + ' m²</b><span>Desperdicio</span></div>';
+  $("tableros").innerHTML = html;
+  $("resultado").hidden = false;
+
+  document.querySelectorAll("[data-png]").forEach((b) =>
+    b.addEventListener("click", () => descargarPNG(parseInt(b.dataset.png, 10))));
+  $("resultado").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function descargarPNG(idx) {
+  const svg = $("svg-" + idx);
+  const xml = new XMLSerializer().serializeToString(svg);
+  const img = new Image();
+  const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+  img.onload = () => {
+    const escala = 6;
+    const vb = svg.viewBox.baseVal;
+    const canvas = document.createElement("canvas");
+    canvas.width = vb.width * escala;
+    canvas.height = vb.height * escala;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const a = document.createElement("a");
+    a.download = "plano-tablero-" + (idx + 1) + ".png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  };
+  img.src = url;
+}
+
+/* --------------------------------- eventos ---------------------------------- */
+function avisar(mensajes) {
+  const caja = $("aviso");
+  if (mensajes.length === 0) { caja.classList.remove("visible"); caja.innerHTML = ""; return; }
+  caja.innerHTML = mensajes.map(esc).join("<br>");
+  caja.classList.add("visible");
+}
+
+function ejecutar() {
+  const cfg = leerConfig();
+  const errCfg = configValida(cfg);
+  if (errCfg) { avisar([errCfg]); return; }
+  const { piezas, errores } = leerPiezas(cfg);
+  if (errores.length > 0) { avisar(errores); return; }
+  if (piezas.length === 0) { avisar(["Agregue al menos una pieza."]); return; }
+  const res = optimizar(piezas, cfg);
+  const avisos = res.sinLugar.length > 0
+    ? ["No caben en el tablero: " + res.sinLugar.join(", ")] : [];
+  avisar(avisos);
+  mostrarResultado(res, cfg);
+}
+
+$("agregar").addEventListener("click", () => agregarFila());
+$("ejemplo").addEventListener("click", () => cargarLista(EJEMPLO));
+$("limpiar").addEventListener("click", () => { $("filas").innerHTML = ""; guardar(); avisar([]); });
+$("optimizar").addEventListener("click", ejecutar);
+$("imprimir").addEventListener("click", () => window.print());
+["ancho", "alto", "sierra", "refilado"].forEach((id) => $(id).addEventListener("input", mostrarZonaUtil));
+
+restaurar();
+mostrarZonaUtil();
+</script>
+</body>
+</html>
