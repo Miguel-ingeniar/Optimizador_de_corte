@@ -130,10 +130,10 @@
   <section class="panel controles" aria-labelledby="t-tablero">
     <h2 id="t-tablero">1. Tablero y condiciones de corte (cm)</h2>
     <div class="grid">
-      <div><label for="ancho">Ancho del tablero</label><input type="number" id="ancho" value="244" min="10" step="0.1"></div>
-      <div><label for="alto">Alto del tablero</label><input type="number" id="alto" value="122" min="10" step="0.1"></div>
-      <div><label for="sierra">Desgaste de sierra por corte</label><input type="number" id="sierra" value="0.5" min="0" step="0.1"></div>
-      <div><label for="refilado">Refilado por borde</label><input type="number" id="refilado" value="0.5" min="0" step="0.1"></div>
+      <div><label for="ancho">Ancho del tablero (cm)</label><input type="number" id="ancho" value="244" min="10" step="0.1"></div>
+      <div><label for="alto">Alto del tablero (cm)</label><input type="number" id="alto" value="122" min="10" step="0.1"></div>
+      <div><label for="sierra">Desgaste de sierra por corte (cm)</label><input type="number" id="sierra" value="0.5" min="0" step="0.1"></div>
+      <div><label for="refilado">Refilado por borde (cm)</label><input type="number" id="refilado" value="0.5" min="0" step="0.1"></div>
     </div>
     <label class="check"><input type="checkbox" id="rotar" checked> Permitir girar las piezas 90° (desmarcar si la veta debe respetarse)</label>
     <p class="sub" id="zona-util" style="margin-top:8px"></p>
@@ -142,7 +142,7 @@
   <section class="panel controles" aria-labelledby="t-piezas">
     <h2 id="t-piezas">2. Piezas a cortar (cm)</h2>
     <table>
-      <thead><tr><th>Nombre</th><th>Ancho</th><th>Alto</th><th>Cantidad</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Ancho (cm)</th><th>Alto (cm)</th><th>Cantidad (und)</th><th></th></tr></thead>
       <tbody id="filas"></tbody>
     </table>
     <div class="botones">
@@ -224,8 +224,8 @@ function crearFila(p) {
   const tr = document.createElement("tr");
   const celda = (html) => { const td = document.createElement("td"); td.innerHTML = html; return td; };
   tr.appendChild(celda('<input type="text" class="f-nombre" aria-label="Nombre" placeholder="Ej: Puerta">'));
-  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-w" aria-label="Ancho">'));
-  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-h" aria-label="Alto">'));
+  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-w" aria-label="Ancho en cm">'));
+  tr.appendChild(celda('<input type="text" inputmode="decimal" class="f-h" aria-label="Alto en cm">'));
   tr.appendChild(celda('<input type="number" class="f-cant" aria-label="Cantidad" min="1" step="1">'));
   tr.appendChild(celda('<button type="button" class="quitar" aria-label="Quitar pieza">✕</button>'));
   tr.querySelector(".f-nombre").value = p.nombre;
@@ -402,7 +402,7 @@ function crearSVG(tablero, idx, cfg, colorDe) {
       s += '<text x="' + (p.x + p.w / 2) + '" y="' + (p.y + p.h / 2 - t * 0.15) + '" font-size="' + t.toFixed(2) +
            '" text-anchor="middle" fill="#1b1b1b">' + esc(p.nombre) + '</text>';
       s += '<text x="' + (p.x + p.w / 2) + '" y="' + (p.y + p.h / 2 + t * 1.05) + '" font-size="' + (t * 0.85).toFixed(2) +
-           '" text-anchor="middle" fill="#333">' + fmt(p.w) + " x " + fmt(p.h) + '</text>';
+           '" text-anchor="middle" fill="#333">' + fmt(p.w) + " x " + fmt(p.h) + ' cm</text>';
     }
   }
   return s + "</svg>";
@@ -425,11 +425,11 @@ function mostrarResultado(res, cfg) {
     areaUtilTotal += areaPiezas;
     const aprov = areaPiezas / areaTablero * 100;
     const [nivel, clase] = clasificar(aprov);
-    html += '<div class="tablero"><div class="tablero-cab"><strong>Tablero ' + (i + 1) + "</strong>" +
+    html += '<div class="tablero"><div class="tablero-cab"><strong>Tablero ' + (i + 1) + " (" + fmt(cfg.ancho) + " x " + fmt(cfg.alto) + " cm)</strong>" +
       '<span>' + t.piezas.length + " piezas · aprovechamiento " + fmt(aprov) + '% · <span class="' + clase + '">' + nivel + "</span></span></div>";
     html += crearSVG(t, i, cfg, colorDe);
     html += '<div class="botones"><button type="button" data-png="' + i + '">Descargar plano (PNG)</button></div>';
-    html += '<details><summary>Ver lista de cortes</summary><table class="detalle"><thead><tr><th>Pieza</th><th>Medida (cm)</th><th>Posición x, y (cm)</th></tr></thead><tbody>';
+    html += '<details><summary>Ver lista de cortes</summary><table class="detalle"><thead><tr><th>Pieza</th><th>Ancho x alto (cm)</th><th>Posición x, y (cm)</th></tr></thead><tbody>';
     for (const p of t.piezas) {
       html += "<tr><td>" + esc(p.nombre) + "</td><td>" + fmt(p.w) + " x " + fmt(p.h) + "</td><td>" + fmt(p.x) + ", " + fmt(p.y) + "</td></tr>";
     }
