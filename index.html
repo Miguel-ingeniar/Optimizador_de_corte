@@ -123,24 +123,31 @@
 <body>
 <header>
   <h1>Optimizador de cortes</h1>
-  <p class="sub">Acomoda piezas de mobiliario en tableros estándar, calcula el aprovechamiento y dibuja el plano de corte.</p>
+  <p class="sub">Organiza piezas de mobiliario en tableros estándar de Madecord y MDF, calcula el aprovechamiento y dibuja el plano de corte, obteniendo el mínimo de desperdicio.</p>
 </header>
 
 <main>
+  <section class="panel controles" aria-labelledby="t-proyecto">
+    <h2 id="t-proyecto">1. Proyecto</h2>
+    <label for="proyecto">Nombre del proyecto</label>
+    <input type="text" id="proyecto" maxlength="80" placeholder="Ej: Cocina apartamento 302" autocomplete="off">
+  </section>
+
   <section class="panel controles" aria-labelledby="t-tablero">
-    <h2 id="t-tablero">1. Tablero y condiciones de corte (cm)</h2>
+    <h2 id="t-tablero">2. Tablero y condiciones de corte (cm)</h2>
     <div class="grid">
       <div><label for="ancho">Ancho del tablero (cm)</label><input type="number" id="ancho" value="244" min="10" step="0.1"></div>
       <div><label for="alto">Alto del tablero (cm)</label><input type="number" id="alto" value="122" min="10" step="0.1"></div>
       <div><label for="sierra">Desgaste de sierra por corte (cm)</label><input type="number" id="sierra" value="0.5" min="0" step="0.1"></div>
       <div><label for="refilado">Refilado por borde (cm)</label><input type="number" id="refilado" value="0.5" min="0" step="0.1"></div>
+      <div><label for="minretazo">Lado mínimo de un retazo útil (cm)</label><input type="number" id="minretazo" value="10" min="1" step="1"></div>
     </div>
     <label class="check"><input type="checkbox" id="rotar" checked> Permitir girar las piezas 90° (desmarcar si la veta debe respetarse)</label>
     <p class="sub" id="zona-util" style="margin-top:8px"></p>
   </section>
 
   <section class="panel controles" aria-labelledby="t-piezas">
-    <h2 id="t-piezas">2. Piezas a cortar (cm)</h2>
+    <h2 id="t-piezas">3. Piezas a cortar (cm)</h2>
     <table>
       <thead><tr><th>Nombre</th><th>Ancho (cm)</th><th>Alto (cm)</th><th>Cantidad (und)</th><th></th></tr></thead>
       <tbody id="filas"></tbody>
@@ -155,7 +162,8 @@
   </section>
 
   <section class="panel" id="resultado" aria-live="polite" hidden>
-    <h2>3. Resultado</h2>
+    <h2>4. Resultado</h2>
+    <p class="sub" id="res-proyecto" style="margin:-6px 0 12px"></p>
     <div class="kpis" id="kpis"></div>
     <div class="botones">
       <button type="button" id="imprimir">Imprimir / guardar PDF</button>
@@ -197,7 +205,7 @@ function leerConfig() {
   const num = (id) => parseFloat(String($(id).value).replace(",", "."));
   const cfg = {
     ancho: num("ancho"), alto: num("alto"),
-    sierra: num("sierra"), refilado: num("refilado"),
+    sierra: num("sierra"), refilado: num("refilado"), minRetazo: num("minretazo"),
     rotar: $("rotar").checked
   };
   cfg.anchoUtil = cfg.ancho - 2 * cfg.refilado;
@@ -206,7 +214,7 @@ function leerConfig() {
 }
 
 function configValida(cfg) {
-  const campos = [cfg.ancho, cfg.alto, cfg.sierra, cfg.refilado];
+  const campos = [cfg.ancho, cfg.alto, cfg.sierra, cfg.refilado, cfg.minRetazo];
   if (campos.some((v) => Number.isNaN(v) || v < 0)) return "Revise las medidas del tablero y de corte: deben ser números positivos.";
   if (cfg.anchoUtil <= 0 || cfg.altoUtil <= 0) return "El refilado es demasiado grande para el tamaño del tablero.";
   return "";
@@ -376,6 +384,68 @@ function clasificar(aprov) {
   else return ["bajo (conviene usar un retazo)", "nivel-bajo"];
 }
 
+/* --------------------------------- retazos ---------------------------------- */
+/*
+   Convierte el espacio libre de un tablero en rectángulos aprovechables:
+   1. Se marca como ocupado cada pieza más el desgaste de sierra a su derecha y abajo.
+   2. Con las coordenadas de los bordes se arma una cuadrícula de celdas libres/ocupadas.
+   3. Se busca el rectángulo libre de mayor área, se guarda como retazo y se marca
+      como ocupado; se repite hasta que no quede ninguno con lados >= minRetazo.
+*/
+function calcularRetazos(tablero, cfg) {
+  const r4 = (v) => Math.round(v * 1e4) / 1e4;
+  const x0 = cfg.refilado, y0 = cfg.refilado;
+  const x1 = r4(cfg.refilado + cfg.anchoUtil), y1 = r4(cfg.refilado + cfg.altoUtil);
+
+  const bloques = tablero.piezas.map((p) => ({
+    xa: p.x, xb: Math.min(p.x + p.w + cfg.sierra, x1),
+    ya: p.y, yb: Math.min(p.y + p.h + cfg.sierra, y1)
+  }));
+
+  const xs = new Set([x0, x1]), ys = new Set([y0, y1]);
+  for (const b of bloques) { xs.add(r4(b.xa)); xs.add(r4(b.xb)); ys.add(r4(b.ya)); ys.add(r4(b.yb)); }
+  const X = [...xs].sort((a, b) => a - b);
+  const Y = [...ys].sort((a, b) => a - b);
+  const nx = X.length - 1, ny = Y.length - 1;
+
+  const libre = Array.from({ length: nx }, () => new Array(ny).fill(true));
+  const ocupar = (xa, xb, ya, yb) => {
+    for (let i = 0; i < nx; i++) {
+      const cx = (X[i] + X[i + 1]) / 2;
+      if (cx <= xa || cx >= xb) continue;
+      for (let j = 0; j < ny; j++) {
+        const cy = (Y[j] + Y[j + 1]) / 2;
+        if (cy > ya && cy < yb) libre[i][j] = false;
+      }
+    }
+  };
+  bloques.forEach((b) => ocupar(b.xa, b.xb, b.ya, b.yb));
+
+  const retazos = [];
+  while (retazos.length < 12) {
+    let mejor = null;
+    for (let i1 = 0; i1 < nx; i1++) {
+      for (let j1 = 0; j1 < ny; j1++) {
+        if (!libre[i1][j1]) continue;
+        let alto = ny - j1;                          // filas libres consecutivas permitidas
+        for (let i2 = i1; i2 < nx && libre[i2][j1]; i2++) {
+          let corrida = 0;
+          while (j1 + corrida < ny && libre[i2][j1 + corrida]) corrida++;
+          alto = Math.min(alto, corrida);
+          const w = X[i2 + 1] - X[i1], h = Y[j1 + alto] - Y[j1];
+          if (w >= cfg.minRetazo && h >= cfg.minRetazo && (!mejor || w * h > mejor.w * mejor.h)) {
+            mejor = { x: X[i1], y: Y[j1], w, h };
+          }
+        }
+      }
+    }
+    if (!mejor) break;
+    retazos.push(mejor);
+    ocupar(mejor.x, mejor.x + mejor.w, mejor.y, mejor.y + mejor.h);
+  }
+  return retazos;
+}
+
 /* -------------------------------- resultados -------------------------------- */
 function fmt(n) {
   return (Math.round(n * 100) / 100).toString().replace(".", ",");
@@ -405,6 +475,24 @@ function crearSVG(tablero, idx, cfg, colorDe) {
            '" text-anchor="middle" fill="#333">' + fmt(p.w) + " x " + fmt(p.h) + ' cm</text>';
     }
   }
+  // retazos aprovechables: rectángulos rayados con su medida
+  s += '<defs><pattern id="ray-' + idx + '" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">' +
+       '<line x1="0" y1="0" x2="0" y2="3" stroke="#9a9a9a" stroke-width="0.5"/></pattern></defs>';
+  tablero.retazos.forEach((r, k) => {
+    s += '<rect x="' + r.x + '" y="' + r.y + '" width="' + r.w + '" height="' + r.h + '" fill="url(#ray-' + idx +
+         ')" stroke="#555" stroke-width="0.4" stroke-dasharray="1.5 1"/>';
+    const texto = fmt(r.w) + " x " + fmt(r.h) + " cm";
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    const vertical = r.h > r.w * 1.6;
+    const largo = vertical ? r.h : r.w, ancho = vertical ? r.w : r.h;
+    const t = Math.min(4, largo / (texto.length * 0.6), ancho / 1.8);
+    const rot = vertical ? ' transform="rotate(-90 ' + cx + " " + cy + ')"' : "";
+    s += '<rect x="' + (cx - (vertical ? t * 0.7 : texto.length * t * 0.3)) + '" y="' + (cy - (vertical ? texto.length * t * 0.3 : t * 0.75)) +
+         '" width="' + (vertical ? t * 1.4 : texto.length * t * 0.6) + '" height="' + (vertical ? texto.length * t * 0.6 : t * 1.5) +
+         '" fill="#ffffff" fill-opacity="0.8"/>';
+    s += '<text x="' + cx + '" y="' + (cy + t * 0.33) + '" font-size="' + t.toFixed(2) +
+         '" text-anchor="middle" font-weight="bold" fill="#222"' + rot + '>' + texto + '</text>';
+  });
   return s + "</svg>";
 }
 
@@ -419,21 +507,36 @@ function mostrarResultado(res, cfg) {
   };
 
   let areaUtilTotal = 0;
+  let areaRetazos = 0;
+  let mayor = null;
   let html = "";
   tableros.forEach((t, i) => {
+    t.retazos = calcularRetazos(t, cfg);
+    for (const r of t.retazos) {
+      areaRetazos += r.w * r.h;
+      if (!mayor || r.w * r.h > mayor.w * mayor.h) mayor = r;
+    }
     const areaPiezas = t.piezas.reduce((a, p) => a + p.w * p.h, 0);
     areaUtilTotal += areaPiezas;
     const aprov = areaPiezas / areaTablero * 100;
     const [nivel, clase] = clasificar(aprov);
     html += '<div class="tablero"><div class="tablero-cab"><strong>Tablero ' + (i + 1) + " (" + fmt(cfg.ancho) + " x " + fmt(cfg.alto) + " cm)</strong>" +
-      '<span>' + t.piezas.length + " piezas · aprovechamiento " + fmt(aprov) + '% · <span class="' + clase + '">' + nivel + "</span></span></div>";
+      '<span>' + t.piezas.length + " piezas · " + t.retazos.length + (t.retazos.length === 1 ? " retazo" : " retazos") + " · aprovechamiento " + fmt(aprov) + '% · <span class="' + clase + '">' + nivel + "</span></span></div>";
     html += crearSVG(t, i, cfg, colorDe);
     html += '<div class="botones"><button type="button" data-png="' + i + '">Descargar plano (PNG)</button></div>';
     html += '<details><summary>Ver lista de cortes</summary><table class="detalle"><thead><tr><th>Pieza</th><th>Ancho x alto (cm)</th><th>Posición x, y (cm)</th></tr></thead><tbody>';
     for (const p of t.piezas) {
       html += "<tr><td>" + esc(p.nombre) + "</td><td>" + fmt(p.w) + " x " + fmt(p.h) + "</td><td>" + fmt(p.x) + ", " + fmt(p.y) + "</td></tr>";
     }
-    html += "</tbody></table></details></div>";
+    html += "</tbody></table>";
+    if (t.retazos.length > 0) {
+      html += '<table class="detalle"><thead><tr><th>Retazo</th><th>Ancho x alto (cm)</th><th>Posición x, y (cm)</th></tr></thead><tbody>';
+      t.retazos.forEach((r, k) => {
+        html += "<tr><td>R" + (k + 1) + "</td><td>" + fmt(r.w) + " x " + fmt(r.h) + "</td><td>" + fmt(r.x) + ", " + fmt(r.y) + "</td></tr>";
+      });
+      html += "</tbody></table>";
+    }
+    html += "</details></div>";
   });
 
   const total = areaTablero * tableros.length;
@@ -442,8 +545,12 @@ function mostrarResultado(res, cfg) {
   $("kpis").innerHTML =
     '<div class="kpi"><b>' + tableros.length + '</b><span>Tableros necesarios</span></div>' +
     '<div class="kpi"><b>' + fmt(aprovGlobal) + '%</b><span>Aprovechamiento total</span></div>' +
-    '<div class="kpi"><b>' + fmt(desperdicio) + ' m²</b><span>Desperdicio</span></div>';
+    '<div class="kpi"><b>' + fmt(desperdicio) + ' m²</b><span>Desperdicio</span></div>' +
+    '<div class="kpi"><b>' + fmt(areaRetazos / 10000) + ' m²</b><span>En retazos aprovechables</span></div>' +
+    '<div class="kpi"><b>' + (mayor ? fmt(mayor.w) + " x " + fmt(mayor.h) + " cm" : "—") + '</b><span>Retazo mayor</span></div>';
   $("tableros").innerHTML = html;
+  const proyecto = $("proyecto").value.trim();
+  $("res-proyecto").textContent = proyecto ? "Proyecto: " + proyecto : "";
   $("resultado").hidden = false;
 
   document.querySelectorAll("[data-png]").forEach((b) =>
@@ -468,7 +575,10 @@ function descargarPNG(idx) {
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
     const a = document.createElement("a");
-    a.download = "plano-tablero-" + (idx + 1) + ".png";
+    const nombre = $("proyecto").value.trim().toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    a.download = (nombre ? nombre + "-" : "") + "plano-tablero-" + (idx + 1) + ".png";
     a.href = canvas.toDataURL("image/png");
     a.click();
   };
@@ -501,6 +611,10 @@ $("agregar").addEventListener("click", () => agregarFila());
 $("ejemplo").addEventListener("click", () => cargarLista(EJEMPLO));
 $("limpiar").addEventListener("click", () => { $("filas").innerHTML = ""; guardar(); avisar([]); });
 $("optimizar").addEventListener("click", ejecutar);
+$("proyecto").addEventListener("input", () => {
+  try { localStorage.setItem("optimizador-proyecto", $("proyecto").value); } catch (e) { /* sin almacenamiento */ }
+});
+try { $("proyecto").value = localStorage.getItem("optimizador-proyecto") || ""; } catch (e) { /* ignorar */ }
 $("imprimir").addEventListener("click", () => window.print());
 ["ancho", "alto", "sierra", "refilado"].forEach((id) => $(id).addEventListener("input", mostrarZonaUtil));
 
